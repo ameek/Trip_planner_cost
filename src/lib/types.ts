@@ -1,5 +1,3 @@
-export type SplitMode = 'even' | 'fixed'
-
 export type Category = 'accommodation' | 'food' | 'transport' | 'other'
 
 export const CATEGORIES: Category[] = ['accommodation', 'food', 'transport', 'other']
@@ -11,13 +9,14 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   other: 'Other',
 }
 
+export type SplitType = 'even' | 'exact'
+
 export type TabKey = 'plan' | 'ledger' | 'members' | 'settle'
 
 export interface TripPublic {
   id: string
   short_id: string
   name: string
-  split_mode: SplitMode
   currency: string
   created_at: string
 }
@@ -29,6 +28,13 @@ export interface Member {
   fixed_contribution: number | null
   sort_order: number
   created_at: string
+}
+
+export interface Tag {
+  id: string
+  trip_id: string
+  label: string
+  sort_order: number
 }
 
 export interface PlanDay {
@@ -48,13 +54,37 @@ export interface PlanStop {
   sort_order: number
 }
 
+export interface EntryPayer {
+  member_id: string
+  amount: number
+}
+
+export interface ExactShare {
+  member_id: string
+  share: number
+}
+
 export interface LedgerEntry {
   id: string
   trip_id: string
   description: string
   amount: number
-  paid_by: string | null
+  paid_by: EntryPayer[]
   category: Category | null
-  split_between: string[]
+  tag_id: string | null
+  split_type: SplitType
+  split_details: string[] | ExactShare[]
   created_at: string
+  updated_at: string
+}
+
+export interface ExpenseRevision {
+  id: string
+  entry_id: string
+  snapshot: LedgerEntry
+  edited_at: string
+}
+
+export function isEvenSplit(entry: Pick<LedgerEntry, 'split_type'>): boolean {
+  return entry.split_type === 'even'
 }

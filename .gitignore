@@ -1,5 +1,8 @@
 node_modules
 dist
+dev-dist
+dist-seed
+.temp
 .env
 .env.local
 .env.*.local

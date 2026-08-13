@@ -1,144 +1,79 @@
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useTrip } from '../lib/TripContext'
-import * as api from '../lib/api'
-import { SegmentToggle } from '../components/SegmentToggle'
+import {
+  useAddMember,
+  useAddTag,
+  useDeleteMember,
+  useDeleteTag,
+  useMembers,
+  useSetContribution,
+  useTags,
+} from '../lib/queries'
+import type { Member } from '../lib/types'
 import { EmptyState } from '../components/EmptyState'
-import type { Member, SplitMode } from '../lib/types'
 
 export default function MembersTab() {
-  const { trip, members, editable, formatMoney, mutate, refresh } = useTrip()
+  const { tripId, editable, formatMoney } = useTrip()
+  const { data: members = [] } = useMembers(tripId)
+  const { data: tags = [] } = useTags(tripId)
   const [name, setName] = useState('')
-  const [err, setErr] = useState<string | null>(null)
-  const [target, setTarget] = useTripTarget(trip.short_id)
-  const [targetInput, setTargetInput] = useState(target == null ? '' : String(target))
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [tagLabel, setTagLabel] = useState('')
 
-  const totalContribution = members.reduce((sum, m) => sum + (m.fixed_contribution ?? 0), 0)
+  const addMember = useAddMember(tripId)
+  const deleteMember = useDeleteMember(tripId)
+  const addTag = useAddTag(tripId)
+  const deleteTag = useDeleteTag(tripId)
 
-  async function submit(e: FormEvent) {
+  function handleMemberSubmit(e: FormEvent) {
     e.preventDefault()
     if (!name.trim()) {
-      setErr('Give the member a name.')
+      setNameError('Give the member a name.')
       return
     }
-    setErr(null)
-    const ok = await mutate(async () => {
-      await api.addMember(trip.id, name)
-      await refresh()
-    })
-    if (ok) setName('')
+    setNameError(null)
+    addMember.mutate(name)
+    setName('')
   }
 
-  async function removeMember(member: Member) {
-    await mutate(async () => {
-      await api.deleteMember(trip.id, member.id)
-      await refresh()
-    })
+  function handleTagSubmit(e: FormEvent) {
+    e.preventDefault()
+    const label = tagLabel.trim()
+    if (!label) return
+    addTag.mutate(label)
+    setTagLabel('')
   }
 
-  async function switchMode(mode: SplitMode) {
-    if (mode === trip.split_mode) return
-    await mutate(async () => {
-      await api.updateTripSplitMode(trip.id, mode)
-      await refresh()
-    })
-  }
-
-  function commitTarget() {
-    const trimmed = targetInput.trim()
-    if (trimmed === '') {
-      setTarget(null)
-      setTargetInput('')
-      return
-    }
-    const n = parseFloat(trimmed)
-    if (!Number.isFinite(n) || n < 0) {
-      setTargetInput(target == null ? '' : String(target))
-      return
-    }
-    setTarget(n)
-  }
-
-  const remaining = target == null ? null : target - totalContribution
+  const evenCount = members.filter((m) => m.fixed_contribution == null).length
 
   return (
     <div>
       <div className="card p-4">
-        <h3 className="font-display text-lg font-bold text-pine">How costs are split</h3>
-        <div className="mt-3">
-          <SegmentToggle<SplitMode>
-            value={trip.split_mode}
-            disabled={!editable}
-            onChange={(v) => void switchMode(v)}
-            options={[
-              { value: 'even', label: 'Even split' },
-              { value: 'fixed', label: 'Fixed contribution' },
-            ]}
-          />
-        </div>
-        <p className="mt-2 text-xs text-moss">
-          {trip.split_mode === 'even'
-            ? 'Every expense is divided equally among the members it applies to.'
-            : 'Each member has a set contribution, and the ledger tracks what everyone has paid against that number.'}
+        <h3 className="font-display text-lg font-bold text-pine">How contributions work</h3>
+        <p className="mt-2 text-sm text-moss">
+          Members with no fixed amount split the remaining costs evenly with the other unset members. A
+          member with a <span className="font-semibold text-ink">fixed amount</span> agrees to pay exactly that
+          — the ledger tracks what they've paid toward it.
+        </p>
+        <p className="mt-2 font-mono text-xs text-moss">
+          {evenCount > 0
+            ? `${evenCount} ${evenCount === 1 ? 'member splits' : 'members split'} the remainder evenly.`
+            : 'Everyone has a fixed contribution — no even splitting.'}
         </p>
       </div>
 
-      {trip.split_mode === 'fixed' && (
-        <div className="card mt-4 p-4">
-          <h3 className="font-display text-lg font-bold text-pine">Contribution target</h3>
-          <p className="mt-1 text-sm text-moss">The total the group is aiming to cover.</p>
-          <div className="mt-3 flex flex-wrap items-end gap-6">
-            <div>
-              <label className="field-label">Sum of contributions</label>
-              <div className="font-mono text-xl tabular-nums text-pine">
-                {formatMoney(totalContribution)}
-              </div>
-            </div>
-            <div>
-              <label className="field-label">Trip target</label>
-              {editable ? (
-                <input
-                  className="input w-36 font-mono"
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={targetInput}
-                  onChange={(e) => setTargetInput(e.target.value.replace(/[^0-9.]/g, ''))}
-                  onBlur={commitTarget}
-                />
-              ) : (
-                <div className="font-mono text-xl tabular-nums">
-                  {target == null ? '—' : formatMoney(target)}
-                </div>
-              )}
-            </div>
-            <div>
-              <label className="field-label">Remaining</label>
-              <div
-                className={`font-mono text-xl tabular-nums ${remaining != null && remaining > 0 ? 'text-clay' : 'text-moss'}`}
-              >
-                {remaining == null ? '—' : formatMoney(remaining)}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {editable && (
-        <form onSubmit={submit} className="card mt-4 p-4">
+        <form onSubmit={handleMemberSubmit} className="card mt-4 p-4">
           <h3 className="font-display text-lg font-bold text-pine">Add a member</h3>
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <div className="min-w-[160px] flex-1">
               <label className="field-label">Name</label>
-              <input
-                className="input"
-                placeholder="e.g. Priya"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
+              <input className="input" placeholder="e.g. Priya" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <button className="btn btn-primary">Add member</button>
           </div>
-          {err && <p className="mt-2 font-mono text-xs text-clay">{err}</p>}
+          {nameError && <p className="mt-2 font-mono text-xs text-clay">{nameError}</p>}
         </form>
       )}
 
@@ -150,93 +85,138 @@ export default function MembersTab() {
       ) : (
         <ul className="mt-4 space-y-2">
           {members.map((m) => (
-            <li key={m.id} className="card flex items-center justify-between gap-3 p-3">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-moss" />
-                <span className="truncate font-medium text-ink">{m.name}</span>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {trip.split_mode === 'fixed' && editable && <ContributionInput member={m} />}
-                {trip.split_mode === 'fixed' && !editable && m.fixed_contribution != null && (
-                  <span className="font-mono text-sm tabular-nums text-moss">
-                    {formatMoney(m.fixed_contribution)}
-                  </span>
-                )}
-                {editable && (
-                  <button
-                    className="icon-btn danger"
-                    title="Remove member"
-                    onClick={() => void removeMember(m)}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            </li>
+            <MemberRow
+              key={m.id}
+              member={m}
+              editable={editable}
+              formatMoney={formatMoney}
+              onDelete={() => deleteMember.mutate(m.id)}
+            />
           ))}
         </ul>
       )}
+
+      <div className="card mt-6 p-4">
+        <h3 className="font-display text-lg font-bold text-pine">Tags & vehicles</h3>
+        <p className="mt-1 text-sm text-moss">
+          Tag expenses to a vehicle or subgroup for labelling and filters. Tags never change the settlement
+          math.
+        </p>
+        {editable && (
+          <form onSubmit={handleTagSubmit} className="mt-3 flex flex-wrap items-end gap-2">
+            <div className="min-w-[140px] flex-1">
+              <label className="field-label">Tag label</label>
+              <input className="input" placeholder="e.g. Bike A" value={tagLabel} onChange={(e) => setTagLabel(e.target.value)} />
+            </div>
+            <button className="btn btn-primary" disabled={!tagLabel.trim()}>Add tag</button>
+          </form>
+        )}
+        {tags.length === 0 ? (
+          <p className="mt-3 font-mono text-xs text-moss">No tags yet.</p>
+        ) : (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {tags.map((t) => (
+              <span key={t.id} className="chip">
+                {t.label}
+                {editable && (
+                  <button type="button" className="ml-1 text-clay hover:text-ink" title="Delete tag" onClick={() => deleteTag.mutate(t.id)}>
+                    ✕
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
-function ContributionInput({ member }: { member: Member }) {
-  const { mutate, refresh } = useTrip()
-  const [val, setVal] = useState(
-    member.fixed_contribution == null ? '' : String(member.fixed_contribution),
-  )
+function MemberRow({
+  member,
+  editable,
+  formatMoney,
+  onDelete,
+}: {
+  member: Member
+  editable: boolean
+  formatMoney: (n: number) => string
+  onDelete: () => void
+}) {
+  const { tripId } = useTrip()
+  const setContribution = useSetContribution(tripId)
+  const fixed = member.fixed_contribution != null
+  const [amountText, setAmountText] = useState(member.fixed_contribution == null ? '' : String(member.fixed_contribution))
+  const [saved, setSaved] = useState(false)
 
-  function commit() {
-    const trimmed = val.trim()
-    if (trimmed === '') {
-      void mutate(async () => {
-        await api.updateMemberContribution(member.id, null)
-        await refresh()
-      })
-      return
-    }
-    const n = parseFloat(trimmed)
+  function commitAmount() {
+    const n = parseFloat(amountText)
     if (!Number.isFinite(n) || n < 0) {
-      setVal(member.fixed_contribution == null ? '' : String(member.fixed_contribution))
+      setAmountText(member.fixed_contribution == null ? '' : String(member.fixed_contribution))
       return
     }
-    if (n === (member.fixed_contribution ?? 0)) return
-    void mutate(async () => {
-      await api.updateMemberContribution(member.id, n)
-      await refresh()
-    })
+    if (n === member.fixed_contribution) return
+    setContribution.mutate({ memberId: member.id, contribution: n })
+    setSaved(true)
+    window.setTimeout(() => setSaved(false), 1200)
   }
 
   return (
-    <input
-      className="input w-24 text-right font-mono"
-      inputMode="decimal"
-      placeholder="0"
-      value={val}
-      onChange={(e) => setVal(e.target.value.replace(/[^0-9.]/g, ''))}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') e.currentTarget.blur()
-      }}
-    />
+    <li className="card flex flex-wrap items-center justify-between gap-3 p-3">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${fixed ? 'bg-dusk' : 'bg-moss'}`} />
+        <span className={`truncate ${fixed ? 'font-medium text-ink' : 'font-medium text-pine'}`}>{member.name}</span>
+        <span className="hidden font-mono text-[10px] uppercase tracking-wide text-moss sm:inline">
+          {fixed ? 'fixed contribution' : 'even split'}
+        </span>
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {editable && (
+          <div className="inline-flex rounded-[3px] border border-line bg-paper p-0.5">
+            <button
+              type="button"
+              className={`rounded-[2px] px-2.5 py-1 font-mono text-[11px] font-medium uppercase tracking-wide transition-colors ${!fixed ? 'bg-pine text-paper' : 'text-moss hover:text-ink'}`}
+              onClick={() => setContribution.mutate({ memberId: member.id, contribution: null })}
+            >
+              Even
+            </button>
+            <button
+              type="button"
+              className={`rounded-[2px] px-2.5 py-1 font-mono text-[11px] font-medium uppercase tracking-wide transition-colors ${fixed ? 'bg-pine text-paper' : 'text-moss hover:text-ink'}`}
+              onClick={() => {
+                if (member.fixed_contribution != null) return
+                setContribution.mutate({ memberId: member.id, contribution: 0 })
+                setAmountText('0')
+                setSaved(true)
+                window.setTimeout(() => setSaved(false), 1200)
+              }}
+            >
+              Fixed
+            </button>
+          </div>
+        )}
+        {fixed && editable && (
+          <div className="flex items-center gap-1.5">
+            <input
+              className="input w-24 text-right font-mono"
+              inputMode="decimal"
+              value={amountText}
+              onChange={(e) => setAmountText(e.target.value.replace(/[^0-9.]/g, ''))}
+              onBlur={commitAmount}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur()
+              }}
+            />
+            {saved && <span className="font-mono text-[10px] text-moss">saved</span>}
+          </div>
+        )}
+        {fixed && !editable && (
+          <span className="font-mono text-sm tabular-nums text-moss">{formatMoney(member.fixed_contribution ?? 0)}</span>
+        )}
+        {editable && (
+          <button className="icon-btn danger" title="Remove member" onClick={onDelete}>✕</button>
+        )}
+      </div>
+    </li>
   )
-}
-
-function useTripTarget(shortId: string) {
-  const key = `trailmark:target:${shortId}`
-  const [target, setTargetState] = useState<number | null>(() => {
-    const raw = localStorage.getItem(key)
-    if (raw == null) return null
-    const n = parseFloat(raw)
-    return Number.isFinite(n) ? n : null
-  })
-  const setTarget = useCallback(
-    (n: number | null) => {
-      setTargetState(n)
-      if (n == null) localStorage.removeItem(key)
-      else localStorage.setItem(key, String(n))
-    },
-    [key],
-  )
-  return [target, setTarget] as const
 }

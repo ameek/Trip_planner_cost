@@ -1,26 +1,41 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useTrip } from '../lib/TripContext'
-import * as api from '../lib/api'
+import {
+  useAddDay,
+  useAddStop,
+  useDays,
+  useDeleteDay,
+  useDeleteStop,
+  useMoveDay,
+  useMoveStop,
+  useStops,
+} from '../lib/queries'
 import type { PlanDay, PlanStop } from '../lib/types'
 import { EmptyState } from '../components/EmptyState'
 
 export default function PlanTab() {
-  const { trip, days, stops, editable, mutate, refresh } = useTrip()
+  const { tripId, editable } = useTrip()
+  const { data: days = [], isPending: daysPending } = useDays(tripId)
+  const { data: stops = [], isPending: stopsPending } = useStops(tripId)
   const [dateLabel, setDateLabel] = useState('')
   const [title, setTitle] = useState('')
   const [overnight, setOvernight] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const addDay = useAddDay(tripId)
+  const deleteDay = useDeleteDay(tripId)
+  const moveDay = useMoveDay(tripId)
+  const deleteStop = useDeleteStop(tripId)
+  const moveStop = useMoveStop(tripId)
 
   const orderedDays = useMemo(
     () => [...days].sort((a, b) => a.sort_order - b.sort_order),
     [days],
   )
-
   const stopsByDay = useMemo(() => {
     const map = new Map<string, PlanStop[]>()
-    const ordered = [...stops].sort((a, b) => a.sort_order - b.sort_order)
-    for (const stop of ordered) {
+    for (const stop of [...stops].sort((a, b) => a.sort_order - b.sort_order)) {
       const list = map.get(stop.day_id) ?? []
       list.push(stop)
       map.set(stop.day_id, list)
@@ -28,92 +43,43 @@ export default function PlanTab() {
     return map
   }, [stops])
 
-  async function submitDay(e: FormEvent) {
+  function handleDaySubmit(e: FormEvent) {
     e.preventDefault()
     if (!title.trim()) {
-      setErr('Give the day a title.')
+      setError('Give the day a title.')
       return
     }
-    setErr(null)
-    const ok = await mutate(async () => {
-      await api.addDay(trip.id, {
-        date_label: dateLabel.trim(),
-        title: title.trim(),
-        is_overnight: overnight,
-      })
-      await refresh()
-    })
-    if (ok) {
-      setDateLabel('')
-      setTitle('')
-      setOvernight(false)
-    }
+    setError(null)
+    addDay.mutate({ date_label: dateLabel.trim(), title: title.trim(), is_overnight: overnight })
+    setDateLabel('')
+    setTitle('')
+    setOvernight(false)
   }
 
-  async function moveDay(dayId: string, direction: -1 | 1) {
-    await mutate(async () => {
-      await api.moveDay(dayId, direction, orderedDays)
-      await refresh()
-    })
-  }
-
-  async function moveStop(stopId: string, dayId: string, direction: -1 | 1) {
-    const ordered = stopsByDay.get(dayId) ?? []
-    await mutate(async () => {
-      await api.moveStop(stopId, direction, ordered)
-      await refresh()
-    })
-  }
-
-  async function removeDay(dayId: string) {
-    await mutate(async () => {
-      await api.deleteDay(dayId)
-      await refresh()
-    })
-  }
-
-  async function removeStop(stopId: string) {
-    await mutate(async () => {
-      await api.deleteStop(stopId)
-      await refresh()
-    })
+  if (daysPending || stopsPending) {
+    return <p className="font-mono text-sm text-moss">Loading the plan…</p>
   }
 
   return (
     <div>
       {editable && (
-        <form onSubmit={submitDay} className="card p-4">
+        <form onSubmit={handleDaySubmit} className="card p-4">
           <h3 className="font-display text-lg font-bold text-pine">Add a day</h3>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <div>
               <label className="field-label">Date label</label>
-              <input
-                className="input"
-                placeholder="e.g. 26 Aug — Wed"
-                value={dateLabel}
-                onChange={(e) => setDateLabel(e.target.value)}
-              />
+              <input className="input" placeholder="e.g. 26 Aug — Wed" value={dateLabel} onChange={(e) => setDateLabel(e.target.value)} />
             </div>
             <div>
               <label className="field-label">Day title</label>
-              <input
-                className="input"
-                placeholder="e.g. Bliss Eco Resort"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
+              <input className="input" placeholder="e.g. Bliss Eco Resort" value={title} onChange={(e) => setTitle(e.target.value)} />
             </div>
           </div>
           <label className="mt-3 flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              className="accent-pine"
-              checked={overnight}
-              onChange={(e) => setOvernight(e.target.checked)}
-            />
+            <input type="checkbox" className="accent-pine" checked={overnight} onChange={(e) => setOvernight(e.target.checked)} />
             Overnight / travel day
           </label>
-          {err && <p className="mt-2 font-mono text-xs text-clay">{err}</p>}
+          {error && <p className="mt-2 font-mono text-xs text-clay">{error}</p>}
           <div className="mt-4">
             <button className="btn btn-primary">Add day</button>
           </div>
@@ -123,11 +89,7 @@ export default function PlanTab() {
       {orderedDays.length === 0 ? (
         <EmptyState
           title="The trail is empty"
-          body={
-            editable
-              ? 'Add a day and start plotting stops.'
-              : 'No days have been plotted yet — check back once the group plans the route.'
-          }
+          body={editable ? 'Add a day and start plotting stops.' : 'No days have been plotted yet — check back once the group plans the route.'}
         />
       ) : (
         <ol className="mt-8">
@@ -139,10 +101,10 @@ export default function PlanTab() {
               total={orderedDays.length}
               stops={stopsByDay.get(day.id) ?? []}
               editable={editable}
-              onMoveDay={moveDay}
-              onMoveStop={moveStop}
-              onDeleteDay={removeDay}
-              onDeleteStop={removeStop}
+              onMoveDay={(dayId, direction) => moveDay.mutate({ dayId, direction })}
+              onMoveStop={(stopId, dayId, direction) => moveStop.mutate({ stopId, dayId, direction })}
+              onDeleteDay={(dayId) => deleteDay.mutate(dayId)}
+              onDeleteStop={(stopId) => deleteStop.mutate(stopId)}
             />
           ))}
         </ol>
@@ -172,21 +134,17 @@ function DayCard({
   onDeleteDay: (dayId: string) => void
   onDeleteStop: (stopId: string) => void
 }) {
-  const { mutate, refresh } = useTrip()
+  const { tripId } = useTrip()
+  const addStop = useAddStop(tripId)
   const [label, setLabel] = useState('')
   const [isStay, setIsStay] = useState(false)
 
-  async function submitStop(e: FormEvent) {
+  function handleStopSubmit(e: FormEvent) {
     e.preventDefault()
     if (!label.trim()) return
-    const ok = await mutate(async () => {
-      await api.addStop(day.id, label.trim(), isStay)
-      await refresh()
-    })
-    if (ok) {
-      setLabel('')
-      setIsStay(false)
-    }
+    addStop.mutate({ dayId: day.id, label: label.trim(), isStay })
+    setLabel('')
+    setIsStay(false)
   }
 
   return (
@@ -200,40 +158,15 @@ function DayCard({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="eyebrow">{day.date_label || 'No date yet'}</div>
-            <h3 className="mt-1 font-display text-xl font-bold leading-snug text-pine">
-              {day.title}
-            </h3>
+            <h3 className="mt-1 font-display text-xl font-bold leading-snug text-pine">{day.title}</h3>
           </div>
           {editable && (
-            <div className="flex shrink-0 flex-col gap-1">
+            <div className="flex shrink-0 flex-col items-end gap-1">
               <div className="flex gap-1">
-                <button
-                  type="button"
-                  className="icon-btn"
-                  title="Move day up"
-                  disabled={index === 0}
-                  onClick={() => onMoveDay(day.id, -1)}
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  title="Move day down"
-                  disabled={index === total - 1}
-                  onClick={() => onMoveDay(day.id, 1)}
-                >
-                  ↓
-                </button>
+                <button type="button" className="icon-btn" title="Move day up" disabled={index === 0} onClick={() => onMoveDay(day.id, -1)}>↑</button>
+                <button type="button" className="icon-btn" title="Move day down" disabled={index === total - 1} onClick={() => onMoveDay(day.id, 1)}>↓</button>
               </div>
-              <button
-                type="button"
-                className="icon-btn danger"
-                title="Delete day"
-                onClick={() => onDeleteDay(day.id)}
-              >
-                ✕
-              </button>
+              <button type="button" className="icon-btn danger" title="Delete day" onClick={() => onDeleteDay(day.id)}>✕</button>
             </div>
           )}
         </div>
@@ -242,9 +175,7 @@ function DayCard({
           <div className="mt-3 flex flex-wrap gap-1.5">
             {stops.map((stop) => (
               <span key={stop.id} className={stop.is_stay ? 'chip chip-pine' : 'chip'}>
-                {stop.is_stay && (
-                  <span className="mr-0.5 inline-block h-1.5 w-1.5 rounded-full bg-current" />
-                )}
+                {stop.is_stay && <span className="mr-0.5 inline-block h-1.5 w-1.5 rounded-full bg-current" />}
                 {stop.label}
               </span>
             ))}
@@ -257,58 +188,23 @@ function DayCard({
               <div className="mb-2 flex flex-wrap items-center gap-1">
                 {stops.map((stop, i) => (
                   <span key={stop.id} className="inline-flex items-center gap-1">
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      title="Move stop up"
-                      disabled={i === 0}
-                      onClick={() => onMoveStop(stop.id, day.id, -1)}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      title="Move stop down"
-                      disabled={i === stops.length - 1}
-                      onClick={() => onMoveStop(stop.id, day.id, 1)}
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn danger"
-                      title="Remove stop"
-                      onClick={() => onDeleteStop(stop.id)}
-                    >
-                      ✕
-                    </button>
+                    <button type="button" className="icon-btn" title="Move stop up" disabled={i === 0} onClick={() => onMoveStop(stop.id, day.id, -1)}>↑</button>
+                    <button type="button" className="icon-btn" title="Move stop down" disabled={i === stops.length - 1} onClick={() => onMoveStop(stop.id, day.id, 1)}>↓</button>
+                    <button type="button" className="icon-btn danger" title="Remove stop" onClick={() => onDeleteStop(stop.id)}>✕</button>
                   </span>
                 ))}
               </div>
             )}
-            <form onSubmit={submitStop} className="flex flex-wrap items-end gap-2">
+            <form onSubmit={handleStopSubmit} className="flex flex-wrap items-end gap-2">
               <div className="min-w-[140px] flex-1">
                 <label className="field-label">Stop</label>
-                <input
-                  className="input"
-                  placeholder="e.g. Dhaka → Khulna"
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                />
+                <input className="input" placeholder="e.g. Dhaka → Khulna" value={label} onChange={(e) => setLabel(e.target.value)} />
               </div>
               <label className="flex items-center gap-1.5 pb-2 text-xs text-ink">
-                <input
-                  type="checkbox"
-                  className="accent-pine"
-                  checked={isStay}
-                  onChange={(e) => setIsStay(e.target.checked)}
-                />
+                <input type="checkbox" className="accent-pine" checked={isStay} onChange={(e) => setIsStay(e.target.checked)} />
                 overnight stay
               </label>
-              <button className="btn btn-ghost" disabled={!label.trim()}>
-                Add stop
-              </button>
+              <button className="btn btn-ghost" disabled={!label.trim()}>Add stop</button>
             </form>
           </div>
         )}

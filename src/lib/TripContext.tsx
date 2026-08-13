@@ -1,21 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import * as api from './api'
 import { formatMoney as formatCurrency } from './format'
-import type { LedgerEntry, Member, PlanDay, PlanStop, TripPublic } from './types'
+import { useTripQuery } from './queries'
+import type { TripPublic } from './types'
 
 export interface TripContextValue {
   trip: TripPublic
-  members: Member[]
-  days: PlanDay[]
-  stops: PlanStop[]
-  entries: LedgerEntry[]
+  tripId: string
   editable: boolean
-  error: string | null
-  clearError: () => void
-  mutate: (fn: () => Promise<unknown>) => Promise<boolean>
-  refresh: () => Promise<void>
   unlockInput: string
   setUnlockInput: (v: string) => void
   codeError: string | null
@@ -33,85 +27,12 @@ export function useTrip(): TripContextValue {
   return ctx
 }
 
-function loadData(tripId: string) {
-  return Promise.all([api.fetchMembers(tripId), api.fetchDays(tripId), api.fetchEntries(tripId)]).then(
-    ([members, days, entries]) =>
-      api.fetchStops(days.map((d) => d.id)).then((stops) => ({ members, days, entries, stops })),
-  )
-}
-
 export function TripProvider({ shortId, children }: { shortId: string; children: ReactNode }) {
-  const [trip, setTrip] = useState<TripPublic | null>(null)
-  const [members, setMembers] = useState<Member[]>([])
-  const [days, setDays] = useState<PlanDay[]>([])
-  const [stops, setStops] = useState<PlanStop[]>([])
-  const [entries, setEntries] = useState<LedgerEntry[]>([])
-  const [loading, setLoading] = useState(true)
+  const tripQuery = useTripQuery(shortId)
   const [editable, setEditable] = useState(() => sessionStorage.getItem(api.lockKey(shortId)) === '1')
-  const [error, setError] = useState<string | null>(null)
   const [unlockInput, setUnlockInput] = useState('')
   const [codeError, setCodeError] = useState<string | null>(null)
   const [verifying, setVerifying] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const t = await api.fetchTrip(shortId)
-        if (cancelled) return
-        if (!t) {
-          setTrip(null)
-          setLoading(false)
-          return
-        }
-        setTrip(t)
-        const data = await loadData(t.id)
-        if (cancelled) return
-        setMembers(data.members)
-        setDays(data.days)
-        setStops(data.stops)
-        setEntries(data.entries)
-        setLoading(false)
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Could not load the trip.')
-          setLoading(false)
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [shortId])
-
-  const refresh = useCallback(async () => {
-    if (!trip) return
-    try {
-      const data = await loadData(trip.id)
-      setMembers(data.members)
-      setDays(data.days)
-      setStops(data.stops)
-      setEntries(data.entries)
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not refresh the trip.')
-    }
-  }, [trip])
-
-  const mutate = useCallback(async (fn: () => Promise<unknown>) => {
-    try {
-      await fn()
-      setError(null)
-      return true
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.')
-      return false
-    }
-  }, [])
-
-  const clearError = useCallback(() => setError(null), [])
 
   const unlock = useCallback(async () => {
     if (unlockInput.length !== 4) {
@@ -143,12 +64,7 @@ export function TripProvider({ shortId, children }: { shortId: string; children:
     setCodeError(null)
   }, [shortId])
 
-  const formatMoney = useCallback(
-    (amount: number) => formatCurrency(amount, trip?.currency ?? 'BDT'),
-    [trip],
-  )
-
-  if (loading) {
+  if (tripQuery.isLoading) {
     return (
       <div className="min-h-screen bg-sand">
         <div className="mx-auto max-w-3xl px-4 pt-20 text-center">
@@ -158,18 +74,15 @@ export function TripProvider({ shortId, children }: { shortId: string; children:
     )
   }
 
-  if (!trip) {
+  if (tripQuery.isError) {
     return (
       <div className="min-h-screen bg-sand">
         <div className="mx-auto max-w-3xl px-4 pt-20">
           <div className="card p-6 text-center">
             <div className="eyebrow">Trailmark</div>
-            <h1 className="mt-2 font-display text-2xl font-bold text-pine">
-              {error ? 'Could not load the trip' : 'Trip not found'}
-            </h1>
+            <h1 className="mt-2 font-display text-2xl font-bold text-pine">Could not load the trip</h1>
             <p className="mt-2 text-sm text-moss">
-              {error ??
-                'Check that the link is correct, or ask whoever shared it for a fresh one.'}
+              {tripQuery.error instanceof Error ? tripQuery.error.message : 'Something went wrong.'}
             </p>
             <Link to="/" className="btn btn-primary mt-5 inline-flex">
               Back to start
@@ -180,17 +93,33 @@ export function TripProvider({ shortId, children }: { shortId: string; children:
     )
   }
 
+  const trip = tripQuery.data
+
+  if (!trip) {
+    return (
+      <div className="min-h-screen bg-sand">
+        <div className="mx-auto max-w-3xl px-4 pt-20">
+          <div className="card p-6 text-center">
+            <div className="eyebrow">Trailmark</div>
+            <h1 className="mt-2 font-display text-2xl font-bold text-pine">Trip not found</h1>
+            <p className="mt-2 text-sm text-moss">
+              Check that the link is correct, or ask whoever shared it for a fresh one.
+            </p>
+            <Link to="/" className="btn btn-primary mt-5 inline-flex">
+              Back to start
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const formatMoney = (amount: number) => formatCurrency(amount, trip.currency)
+
   const value: TripContextValue = {
     trip,
-    members,
-    days,
-    stops,
-    entries,
+    tripId: trip.id,
     editable,
-    error,
-    clearError,
-    mutate,
-    refresh,
     unlockInput,
     setUnlockInput,
     codeError,
