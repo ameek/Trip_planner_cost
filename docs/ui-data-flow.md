@@ -110,7 +110,7 @@ flowchart LR
     subgraph Client["Browser"]
         direction TB
         HOOKS[Query hooks<br/>useTrip · members · days · stops · tags · entries · revisions]
-        QCM[cacheMap: ['trip',s] ['members',id] ['days',id] ['stops',id]<br/>['tags',id] ['entries',id] ['revisions',entryId]]
+        QCM["cacheMap: ['trip',s] ['members',id] ['days',id] ['stops',id]<br/>['tags',id] ['entries',id] ['revisions',entryId]"]
         IDB[(IndexedDB<br/>persisted cache)]
     end
     HOOKS --> QCM
