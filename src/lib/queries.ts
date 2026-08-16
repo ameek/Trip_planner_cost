@@ -165,6 +165,35 @@ export function useAddDay(tripId: string) {
   )
 }
 
+export function useAddDaysBatch(tripId: string) {
+  return listMutation<PlanDay, api.NewDayInput[]>(
+    tripId,
+    daysKey(tripId),
+    (inputs) => api.addDaysBatch(tripId, inputs),
+    (old, inputs) => [
+      ...(old ?? []),
+      ...inputs.map((data, idx) => ({
+        id: `tmp-${crypto.randomUUID()}-${idx}`,
+        trip_id: tripId,
+        date_label: data.date_label,
+        title: data.title,
+        is_overnight: data.is_overnight,
+        sort_order: (old?.length ?? 0) + 1 + idx,
+      })),
+    ],
+    [stopsKey(tripId)],
+  )
+}
+
+export function useUpdateDay(tripId: string) {
+  return listMutation<PlanDay, { dayId: string; patch: Partial<api.NewDayInput> }>(
+    tripId,
+    daysKey(tripId),
+    (v) => api.updateDay(v.dayId, v.patch),
+    (old, v) => (old ?? []).map((d) => (d.id === v.dayId ? { ...d, ...v.patch } : d)),
+  )
+}
+
 export function useDeleteDay(tripId: string) {
   return listMutation<PlanDay, string>(
     tripId,

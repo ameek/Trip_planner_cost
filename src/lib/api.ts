@@ -189,6 +189,29 @@ export async function addDay(tripId: string, input: NewDayInput): Promise<void> 
   if (error) throw new Error(error.message)
 }
 
+export async function addDaysBatch(tripId: string, inputs: NewDayInput[]): Promise<void> {
+  if (inputs.length === 0) return
+  const { data } = await supabase
+    .from('plan_days')
+    .select('sort_order')
+    .eq('trip_id', tripId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+  const baseSortOrder = data && data[0] ? Number(data[0].sort_order) + 1 : 1
+  const rows = inputs.map((input, idx) => ({
+    trip_id: tripId,
+    ...input,
+    sort_order: baseSortOrder + idx,
+  }))
+  const { error } = await supabase.from('plan_days').insert(rows)
+  if (error) throw new Error(error.message)
+}
+
+export async function updateDay(dayId: string, patch: Partial<NewDayInput>): Promise<void> {
+  const { error } = await supabase.from('plan_days').update(patch).eq('id', dayId)
+  if (error) throw new Error(error.message)
+}
+
 export async function deleteDay(dayId: string): Promise<void> {
   const { error } = await supabase.from('plan_days').delete().eq('id', dayId)
   if (error) throw new Error(error.message)
