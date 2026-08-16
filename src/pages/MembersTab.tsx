@@ -6,6 +6,7 @@ import {
   useAddTag,
   useDeleteMember,
   useDeleteTag,
+  useEntries,
   useMembers,
   useSetContribution,
   useTags,
@@ -17,9 +18,11 @@ export default function MembersTab() {
   const { tripId, editable, formatMoney } = useTrip()
   const { data: members = [] } = useMembers(tripId)
   const { data: tags = [] } = useTags(tripId)
+  const { data: entries = [] } = useEntries(tripId)
   const [name, setName] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
   const [tagLabel, setTagLabel] = useState('')
+  const [memberToDelete, setMemberToDelete] = useState<Member | null>(null)
 
   const addMember = useAddMember(tripId)
   const deleteMember = useDeleteMember(tripId)
@@ -45,7 +48,22 @@ export default function MembersTab() {
     setTagLabel('')
   }
 
+  function confirmDeleteMember() {
+    if (!memberToDelete) return
+    deleteMember.mutate(memberToDelete.id)
+    setMemberToDelete(null)
+  }
+
   const evenCount = members.filter((m) => m.fixed_contribution == null).length
+
+  // Calculate expense impact for the member pending deletion
+  const memberPaidEntries = memberToDelete
+    ? entries.filter((e) => e.paid_by.some((p) => p.member_id === memberToDelete.id))
+    : []
+  const memberPaidTotal = memberPaidEntries.reduce((sum, e) => {
+    const p = e.paid_by.find((item) => item.member_id === memberToDelete?.id)
+    return sum + (p ? p.amount : 0)
+  }, 0)
 
   return (
     <div>
@@ -90,10 +108,58 @@ export default function MembersTab() {
               member={m}
               editable={editable}
               formatMoney={formatMoney}
-              onDelete={() => deleteMember.mutate(m.id)}
+              onDelete={() => setMemberToDelete(m)}
             />
           ))}
         </ul>
+      )}
+
+      {/* Confirmation Modal for Accidental Member Removal */}
+      {memberToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4 backdrop-blur-xs">
+          <div className="card w-full max-w-md border-clay/30 p-5 shadow-xl">
+            <div className="eyebrow text-clay">Confirm Removal</div>
+            <h3 className="mt-1 font-display text-xl font-bold text-pine">
+              Remove {memberToDelete.name}?
+            </h3>
+
+            {memberPaidTotal > 0 ? (
+              <div className="mt-3 rounded border border-clay/30 bg-clay/5 p-3 text-xs text-ink">
+                <p className="font-semibold text-clay">
+                  ⚠️ {memberToDelete.name} has recorded payments on this trip!
+                </p>
+                <p className="mt-1.5 text-moss">
+                  They paid for <span className="font-semibold text-ink">{memberPaidEntries.length} expense(s)</span> totaling{' '}
+                  <span className="font-semibold text-pine">{formatMoney(memberPaidTotal)}</span>.
+                </p>
+                <p className="mt-1.5 text-moss">
+                  Removing them will remove them as payer and split participant, but the expenses themselves will stay in the ledger.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-moss">
+                Are you sure you want to remove <strong className="text-ink">{memberToDelete.name}</strong> from this trip? They will no longer be included in splits or settlement balances.
+              </p>
+            )}
+
+            <div className="mt-5 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                className="btn btn-ghost text-xs"
+                onClick={() => setMemberToDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-clay text-xs font-semibold"
+                onClick={confirmDeleteMember}
+              >
+                Yes, Remove Member
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="card mt-6 p-4">

@@ -7,7 +7,15 @@ import App from './App'
 import { createIdbPersister, PERSIST_BUSTER, queryClient } from './lib/queryClient'
 import './index.css'
 
-registerSW({ immediate: true })
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    void updateSW(true)
+  },
+  onOfflineReady() {
+    console.log('Trailmark: Ready to work offline')
+  },
+})
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
