@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { useIsRestoring } from '@tanstack/react-query'
 import * as api from './api'
 import { formatMoney as formatCurrency } from './format'
 import { useTripQuery } from './queries'
@@ -28,6 +29,7 @@ export function useTrip(): TripContextValue {
 }
 
 export function TripProvider({ shortId, children }: { shortId: string; children: ReactNode }) {
+  const isRestoring = useIsRestoring()
   const tripQuery = useTripQuery(shortId)
   const [editable, setEditable] = useState(() => api.isTripUnlocked(shortId))
   const [unlockInput, setUnlockInput] = useState('')
@@ -71,38 +73,40 @@ export function TripProvider({ shortId, children }: { shortId: string; children:
     setCodeError(null)
   }, [shortId])
 
-  if (tripQuery.isLoading && !tripQuery.data) {
+  // While IndexedDB is restoring cache or query is loading initial data, show loading state
+  if (isRestoring || (tripQuery.isLoading && !tripQuery.data)) {
     return (
       <div className="min-h-screen bg-sand">
         <div className="mx-auto max-w-3xl px-4 pt-20 text-center">
-          <p className="font-mono text-sm text-moss">Loading the trip…</p>
+          <p className="font-mono text-sm text-moss">Loading trip…</p>
         </div>
       </div>
     )
   }
 
-  if (tripQuery.isError && !tripQuery.data) {
-    return (
-      <div className="min-h-screen bg-sand">
-        <div className="mx-auto max-w-3xl px-4 pt-20">
-          <div className="card p-6 text-center">
-            <div className="eyebrow">Trailmark</div>
-            <h1 className="mt-2 font-display text-2xl font-bold text-pine">Could not load the trip</h1>
-            <p className="mt-2 text-sm text-moss">
-              {tripQuery.error instanceof Error ? tripQuery.error.message : 'Something went wrong.'}
-            </p>
-            <Link to="/?select=1" className="btn btn-primary mt-5 inline-flex">
-              Back to start
-            </Link>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  const trip = tripQuery.data
+  // Fallback to local storage mirror cache if React Query didn't have it yet
+  const trip = tripQuery.data ?? api.getLocalCache<TripPublic>(api.cacheTripKey(shortId))
 
   if (!trip) {
+    if (tripQuery.isError) {
+      return (
+        <div className="min-h-screen bg-sand">
+          <div className="mx-auto max-w-3xl px-4 pt-20">
+            <div className="card p-6 text-center">
+              <div className="eyebrow">Trailmark</div>
+              <h1 className="mt-2 font-display text-2xl font-bold text-pine">Could not load the trip</h1>
+              <p className="mt-2 text-sm text-moss">
+                {tripQuery.error instanceof Error ? tripQuery.error.message : 'Something went wrong.'}
+              </p>
+              <Link to="/?select=1" className="btn btn-primary mt-5 inline-flex">
+                Back to start
+              </Link>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="min-h-screen bg-sand">
         <div className="mx-auto max-w-3xl px-4 pt-20">
@@ -112,7 +116,7 @@ export function TripProvider({ shortId, children }: { shortId: string; children:
             <p className="mt-2 text-sm text-moss">
               Check that the link is correct, or ask whoever shared it for a fresh one.
             </p>
-            <Link to="/" className="btn btn-primary mt-5 inline-flex">
+            <Link to="/?select=1" className="btn btn-primary mt-5 inline-flex">
               Back to start
             </Link>
           </div>

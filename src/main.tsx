@@ -25,6 +25,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         persister: createIdbPersister(),
         maxAge: 1000 * 60 * 60 * 24 * 30,
         buster: PERSIST_BUSTER,
+        dehydrateOptions: {
+          shouldDehydrateQuery: (query) => query.state.data !== undefined,
+        },
       }}
     >
       <BrowserRouter>

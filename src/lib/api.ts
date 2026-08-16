@@ -15,6 +15,29 @@ import type {
 
 export const lockKey = (shortId: string) => `trailmark:unlocked:${shortId}`
 export const pinHashKey = (shortId: string) => `trailmark:pin_hash:${shortId}`
+export const cacheTripKey = (shortId: string) => `trailmark:cache:trip:${shortId.toLowerCase()}`
+export const cacheMembersKey = (tripId: string) => `trailmark:cache:members:${tripId}`
+export const cacheDaysKey = (tripId: string) => `trailmark:cache:days:${tripId}`
+export const cacheStopsKey = (tripId: string) => `trailmark:cache:stops:${tripId}`
+export const cacheTagsKey = (tripId: string) => `trailmark:cache:tags:${tripId}`
+export const cacheEntriesKey = (tripId: string) => `trailmark:cache:entries:${tripId}`
+
+export function getLocalCache<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+export function setLocalCache<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // ignore
+  }
+}
 
 export async function hashPin(shortId: string, pin: string): Promise<string> {
   const text = `trailmark:${shortId.toLowerCase()}:${pin.trim()}`
@@ -94,9 +117,17 @@ export async function createTrip(name: string, editCode: string): Promise<{ shor
     const { data, error } = await supabase
       .from('trips')
       .insert({ short_id: shortId, name: name.trim(), edit_code: editCode })
-      .select('short_id')
+      .select('id, short_id, name, currency, created_at')
       .single()
     if (!error && data) {
+      const tripObj: TripPublic = {
+        id: data.id,
+        short_id: data.short_id,
+        name: data.name,
+        currency: data.currency,
+        created_at: data.created_at,
+      }
+      setLocalCache(cacheTripKey(shortId), tripObj)
       await savePinHash(shortId, editCode)
       setTripUnlocked(shortId, true)
       return { shortId: data.short_id }
@@ -107,6 +138,7 @@ export async function createTrip(name: string, editCode: string): Promise<{ shor
 }
 
 export async function fetchTrip(shortId: string): Promise<TripPublic | null> {
+  // 1. Try online direct query to trips table (also captures edit_code for offline PIN verification)
   try {
     const { data, error } = await supabase
       .from('trips')
@@ -118,22 +150,40 @@ export async function fetchTrip(shortId: string): Promise<TripPublic | null> {
       if (data.edit_code) {
         void savePinHash(shortId, data.edit_code)
       }
-      return {
+      const tripObj: TripPublic = {
         id: data.id,
         short_id: data.short_id,
         name: data.name,
         currency: data.currency,
         created_at: data.created_at,
       }
+      setLocalCache(cacheTripKey(shortId), tripObj)
+      return tripObj
     }
   } catch {
-    // Network failure on direct select, fall through to RPC fallback
+    // Network failure on direct select, fall through
   }
 
-  const { data, error } = await supabase.rpc('get_trip_public', { p_short_id: shortId })
-  if (error) throw new Error(error.message)
-  const rows = Array.isArray(data) ? data : data == null ? [] : [data]
-  return (rows[0] as TripPublic | undefined) ?? null
+  // 2. Try online RPC
+  try {
+    const { data, error } = await supabase.rpc('get_trip_public', { p_short_id: shortId })
+    if (!error && data) {
+      const rows = Array.isArray(data) ? data : [data]
+      if (rows[0]) {
+        const tripObj = rows[0] as TripPublic
+        setLocalCache(cacheTripKey(shortId), tripObj)
+        return tripObj
+      }
+    }
+  } catch {
+    // Network failure on RPC
+  }
+
+  // 3. Fallback to local cache for offline mode
+  const cached = getLocalCache<TripPublic>(cacheTripKey(shortId))
+  if (cached) return cached
+
+  return null
 }
 
 export async function verifyCode(shortId: string, code: string): Promise<boolean> {
@@ -165,17 +215,26 @@ export async function verifyCode(shortId: string, code: string): Promise<boolean
 }
 
 export async function fetchMembers(tripId: string): Promise<Member[]> {
-  const { data, error } = await supabase
-    .from('members')
-    .select('*')
-    .eq('trip_id', tripId)
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: true })
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((m: any) => ({
-    ...m,
-    fixed_contribution: m.fixed_contribution == null ? null : Number(m.fixed_contribution),
-  }))
+  try {
+    const { data, error } = await supabase
+      .from('members')
+      .select('*')
+      .eq('trip_id', tripId)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+    if (!error && data) {
+      const members = data.map((m: any) => ({
+        ...m,
+        fixed_contribution: m.fixed_contribution == null ? null : Number(m.fixed_contribution),
+      }))
+      setLocalCache(cacheMembersKey(tripId), members)
+      return members
+    }
+  } catch {
+    // offline fallback
+  }
+  const cached = getLocalCache<Member[]>(cacheMembersKey(tripId))
+  return cached ?? []
 }
 
 export async function addMember(tripId: string, name: string): Promise<void> {
@@ -243,13 +302,21 @@ export async function deleteMember(tripId: string, memberId: string): Promise<vo
 }
 
 export async function fetchTags(tripId: string): Promise<Tag[]> {
-  const { data, error } = await supabase
-    .from('tags')
-    .select('*')
-    .eq('trip_id', tripId)
-    .order('sort_order', { ascending: true })
-  if (error) throw new Error(error.message)
-  return data ?? []
+  try {
+    const { data, error } = await supabase
+      .from('tags')
+      .select('*')
+      .eq('trip_id', tripId)
+      .order('sort_order', { ascending: true })
+    if (!error && data) {
+      setLocalCache(cacheTagsKey(tripId), data)
+      return data
+    }
+  } catch {
+    // offline fallback
+  }
+  const cached = getLocalCache<Tag[]>(cacheTagsKey(tripId))
+  return cached ?? []
 }
 
 export async function addTag(tripId: string, label: string): Promise<void> {
@@ -272,13 +339,21 @@ export async function deleteTag(tagId: string): Promise<void> {
 }
 
 export async function fetchDays(tripId: string): Promise<PlanDay[]> {
-  const { data, error } = await supabase
-    .from('plan_days')
-    .select('*')
-    .eq('trip_id', tripId)
-    .order('sort_order', { ascending: true })
-  if (error) throw new Error(error.message)
-  return data ?? []
+  try {
+    const { data, error } = await supabase
+      .from('plan_days')
+      .select('*')
+      .eq('trip_id', tripId)
+      .order('sort_order', { ascending: true })
+    if (!error && data) {
+      setLocalCache(cacheDaysKey(tripId), data)
+      return data
+    }
+  } catch {
+    // offline fallback
+  }
+  const cached = getLocalCache<PlanDay[]>(cacheDaysKey(tripId))
+  return cached ?? []
 }
 
 export interface NewDayInput {
@@ -342,13 +417,22 @@ export async function moveDay(dayId: string, direction: -1 | 1, ordered: PlanDay
 
 export async function fetchStops(dayIds: string[]): Promise<PlanStop[]> {
   if (dayIds.length === 0) return []
-  const { data, error } = await supabase
-    .from('plan_stops')
-    .select('*')
-    .in('day_id', dayIds)
-    .order('sort_order', { ascending: true })
-  if (error) throw new Error(error.message)
-  return data ?? []
+  const cacheKey = `trailmark:cache:stops:${dayIds.slice().sort().join(',')}`
+  try {
+    const { data, error } = await supabase
+      .from('plan_stops')
+      .select('*')
+      .in('day_id', dayIds)
+      .order('sort_order', { ascending: true })
+    if (!error && data) {
+      setLocalCache(cacheKey, data)
+      return data
+    }
+  } catch {
+    // offline fallback
+  }
+  const cached = getLocalCache<PlanStop[]>(cacheKey)
+  return cached ?? []
 }
 
 export async function addStop(dayId: string, label: string, isStay: boolean): Promise<void> {
@@ -386,13 +470,22 @@ export async function moveStop(
 }
 
 export async function fetchEntries(tripId: string): Promise<LedgerEntry[]> {
-  const { data, error } = await supabase
-    .from('ledger_entries')
-    .select('*')
-    .eq('trip_id', tripId)
-    .order('created_at', { ascending: true })
-  if (error) throw new Error(error.message)
-  return (data ?? []).map(toEntry)
+  try {
+    const { data, error } = await supabase
+      .from('ledger_entries')
+      .select('*')
+      .eq('trip_id', tripId)
+      .order('created_at', { ascending: true })
+    if (!error && data) {
+      const entries = data.map(toEntry)
+      setLocalCache(cacheEntriesKey(tripId), entries)
+      return entries
+    }
+  } catch {
+    // offline fallback
+  }
+  const cached = getLocalCache<LedgerEntry[]>(cacheEntriesKey(tripId))
+  return cached ?? []
 }
 
 function toEntry(row: any): LedgerEntry {
