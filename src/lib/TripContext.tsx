@@ -29,7 +29,7 @@ export function useTrip(): TripContextValue {
 
 export function TripProvider({ shortId, children }: { shortId: string; children: ReactNode }) {
   const tripQuery = useTripQuery(shortId)
-  const [editable, setEditable] = useState(() => sessionStorage.getItem(api.lockKey(shortId)) === '1')
+  const [editable, setEditable] = useState(() => api.isTripUnlocked(shortId))
   const [unlockInput, setUnlockInput] = useState('')
   const [codeError, setCodeError] = useState<string | null>(null)
   const [verifying, setVerifying] = useState(false)
@@ -44,27 +44,34 @@ export function TripProvider({ shortId, children }: { shortId: string; children:
     try {
       const ok = await api.verifyCode(shortId, unlockInput)
       if (ok) {
-        sessionStorage.setItem(api.lockKey(shortId), '1')
+        api.setTripUnlocked(shortId, true)
         setEditable(true)
         setUnlockInput('')
       } else {
         setCodeError("That code didn't match. Try again.")
       }
     } catch (err) {
-      setCodeError(err instanceof Error ? err.message : 'Could not verify the code.')
+      const okOffline = await api.checkPinMatch(shortId, unlockInput)
+      if (okOffline) {
+        api.setTripUnlocked(shortId, true)
+        setEditable(true)
+        setUnlockInput('')
+      } else {
+        setCodeError(err instanceof Error ? err.message : 'Could not verify the code.')
+      }
     } finally {
       setVerifying(false)
     }
   }, [shortId, unlockInput])
 
   const lock = useCallback(() => {
-    sessionStorage.removeItem(api.lockKey(shortId))
+    api.setTripUnlocked(shortId, false)
     setEditable(false)
     setUnlockInput('')
     setCodeError(null)
   }, [shortId])
 
-  if (tripQuery.isLoading) {
+  if (tripQuery.isLoading && !tripQuery.data) {
     return (
       <div className="min-h-screen bg-sand">
         <div className="mx-auto max-w-3xl px-4 pt-20 text-center">
@@ -74,7 +81,7 @@ export function TripProvider({ shortId, children }: { shortId: string; children:
     )
   }
 
-  if (tripQuery.isError) {
+  if (tripQuery.isError && !tripQuery.data) {
     return (
       <div className="min-h-screen bg-sand">
         <div className="mx-auto max-w-3xl px-4 pt-20">
@@ -84,7 +91,7 @@ export function TripProvider({ shortId, children }: { shortId: string; children:
             <p className="mt-2 text-sm text-moss">
               {tripQuery.error instanceof Error ? tripQuery.error.message : 'Something went wrong.'}
             </p>
-            <Link to="/" className="btn btn-primary mt-5 inline-flex">
+            <Link to="/?select=1" className="btn btn-primary mt-5 inline-flex">
               Back to start
             </Link>
           </div>

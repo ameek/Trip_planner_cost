@@ -14,6 +14,69 @@ import type {
 } from './types'
 
 export const lockKey = (shortId: string) => `trailmark:unlocked:${shortId}`
+export const pinHashKey = (shortId: string) => `trailmark:pin_hash:${shortId}`
+
+export async function hashPin(shortId: string, pin: string): Promise<string> {
+  const text = `trailmark:${shortId.toLowerCase()}:${pin.trim()}`
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    try {
+      const encoder = new TextEncoder()
+      const data = encoder.encode(text)
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+      const hashArray = Array.from(new Uint8Array(hashBuffer))
+      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+    } catch {
+      // Fall through to fallback
+    }
+  }
+  let hash = 0
+  for (let i = 0; i < text.length; i++) {
+    const char = text.charCodeAt(i)
+    hash = (hash << 5) - hash + char
+    hash |= 0
+  }
+  return `h_${Math.abs(hash).toString(16)}`
+}
+
+export function isTripUnlocked(shortId: string): boolean {
+  try {
+    return localStorage.getItem(lockKey(shortId)) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function setTripUnlocked(shortId: string, unlocked: boolean): void {
+  try {
+    if (unlocked) {
+      localStorage.setItem(lockKey(shortId), '1')
+    } else {
+      localStorage.removeItem(lockKey(shortId))
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export async function savePinHash(shortId: string, pin: string): Promise<void> {
+  try {
+    const hash = await hashPin(shortId, pin)
+    localStorage.setItem(pinHashKey(shortId), hash)
+  } catch {
+    // ignore
+  }
+}
+
+export async function checkPinMatch(shortId: string, pin: string): Promise<boolean> {
+  try {
+    const stored = localStorage.getItem(pinHashKey(shortId))
+    if (!stored) return false
+    const computed = await hashPin(shortId, pin)
+    return stored === computed
+  } catch {
+    return false
+  }
+}
 
 const SHORT_ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789'
 
@@ -33,13 +96,40 @@ export async function createTrip(name: string, editCode: string): Promise<{ shor
       .insert({ short_id: shortId, name: name.trim(), edit_code: editCode })
       .select('short_id')
       .single()
-    if (!error && data) return { shortId: data.short_id }
+    if (!error && data) {
+      await savePinHash(shortId, editCode)
+      setTripUnlocked(shortId, true)
+      return { shortId: data.short_id }
+    }
     if (error && error.code !== '23505') throw new Error(error.message)
   }
   throw new Error('Could not create the trip. Please try again.')
 }
 
 export async function fetchTrip(shortId: string): Promise<TripPublic | null> {
+  try {
+    const { data, error } = await supabase
+      .from('trips')
+      .select('id, short_id, name, currency, created_at, edit_code')
+      .eq('short_id', shortId)
+      .maybeSingle()
+
+    if (!error && data) {
+      if (data.edit_code) {
+        void savePinHash(shortId, data.edit_code)
+      }
+      return {
+        id: data.id,
+        short_id: data.short_id,
+        name: data.name,
+        currency: data.currency,
+        created_at: data.created_at,
+      }
+    }
+  } catch {
+    // Network failure on direct select, fall through to RPC fallback
+  }
+
   const { data, error } = await supabase.rpc('get_trip_public', { p_short_id: shortId })
   if (error) throw new Error(error.message)
   const rows = Array.isArray(data) ? data : data == null ? [] : [data]
@@ -47,9 +137,31 @@ export async function fetchTrip(shortId: string): Promise<TripPublic | null> {
 }
 
 export async function verifyCode(shortId: string, code: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc('verify_trip_code', { p_short_id: shortId, p_code: code })
-  if (error) throw new Error(error.message)
-  return data === true
+  // 1. Check local hash first (instant & works 100% offline)
+  const localMatch = await checkPinMatch(shortId, code)
+  if (localMatch) {
+    setTripUnlocked(shortId, true)
+    return true
+  }
+
+  // 2. If online, verify with Supabase RPC
+  if (typeof navigator === 'undefined' || navigator.onLine) {
+    try {
+      const { data, error } = await supabase.rpc('verify_trip_code', { p_short_id: shortId, p_code: code })
+      if (!error && data === true) {
+        await savePinHash(shortId, code)
+        setTripUnlocked(shortId, true)
+        return true
+      }
+      if (!error && data === false) {
+        return false
+      }
+    } catch {
+      // If network call failed, fallback to local match check
+    }
+  }
+
+  return checkPinMatch(shortId, code)
 }
 
 export async function fetchMembers(tripId: string): Promise<Member[]> {

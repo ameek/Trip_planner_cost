@@ -20,7 +20,7 @@ export const queryClient = new QueryClient({
       gcTime: 1000 * 60 * 60 * 24 * 30,
       refetchOnWindowFocus: true,
       retry: 2,
-      networkMode: 'online',
+      networkMode: 'offlineFirst',
     },
     mutations: {
       retry: 2,
