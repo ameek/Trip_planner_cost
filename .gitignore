@@ -9,3 +9,5 @@ dist-seed
 .DS_Store
 *.log
 .vite
+.vercel
+.env*

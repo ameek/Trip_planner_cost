@@ -1,6 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="4" fill="#1c2b21"/>
-  <circle cx="10" cy="10" r="3" fill="#f7f3e8"/>
-  <circle cx="16" cy="18" r="3" fill="#2b3a54" stroke="#f7f3e8" stroke-width="1.5"/>
-  <circle cx="22" cy="26" r="3" fill="#b5652d"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="14" fill="#1c2b21"/>
+  <rect width="64" height="64" rx="14" fill="url(#bg_gradient)" opacity="0.4"/>
+  <circle cx="32" cy="32" r="22" stroke="#2a4032" stroke-width="2.5"/>
+  <circle cx="32" cy="32" r="17" stroke="#b5652d" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <path d="M18 38L27 26L33 34L40 24L48 38H18Z" fill="#2b3a54" opacity="0.85"/>
+  <path d="M27 26L33 34L30 38H18L27 26Z" fill="#3a4d6e" opacity="0.5"/>
+  <path d="M22 42C26 42 26 36 32 36C38 36 38 28 44 24" stroke="#d97736" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M41 21L47 24L44 30" stroke="#d97736" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="32,16 36,32 32,48 28,32" fill="url(#needle_grad)"/>
+  <circle cx="32" cy="32" r="3.5" fill="#f7f3e8" stroke="#1c2b21" stroke-width="1.5"/>
+  <circle cx="32" cy="12" r="1.5" fill="#e2b86b"/>
+  <circle cx="52" cy="32" r="1.5" fill="#e2b86b"/>
+  <circle cx="32" cy="52" r="1.5" fill="#e2b86b"/>
+  <circle cx="12" cy="32" r="1.5" fill="#e2b86b"/>
+  <defs>
+    <linearGradient id="bg_gradient" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2a4032"/>
+      <stop offset="1" stop-color="#0f1712"/>
+    </linearGradient>
+    <linearGradient id="needle_grad" x1="28" y1="16" x2="36" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#e2b86b"/>
+      <stop offset="0.5" stop-color="#c49035"/>
+      <stop offset="1" stop-color="#b5652d"/>
+    </linearGradient>
+  </defs>
 </svg>
